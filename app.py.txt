@@ -1,0 +1,63 @@
+import requests
+import pandas as pd
+import streamlit as st
+
+st.title("Crypto Scanner")
+
+@st.cache_data(ttl=120)
+def ambil_data():
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 100,
+        "page": 1,
+        "price_change_percentage": "24h,7d",
+    }
+    data = requests.get(url, params=params, timeout=60).json()
+    if isinstance(data, dict):
+        raise RuntimeError(f"CoinGecko menolak permintaan: {data}")
+    df = pd.DataFrame(data)
+    df = df[[
+        "symbol", "name", "current_price",
+        "price_change_percentage_24h_in_currency",
+        "price_change_percentage_7d_in_currency",
+        "total_volume",
+    ]]
+    df["symbol"] = df["symbol"].str.upper()
+    df.columns = [
+        "Simbol", "Nama", "Harga (USD)",
+        "Perubahan 24j (%)", "Perubahan 7h (%)", "Volume (USD)",
+    ]
+    return df
+
+try:
+    df = ambil_data()
+except Exception as e:
+    st.error(f"Gagal mengambil data: {e}")
+    st.stop()
+
+# Filter di sidebar
+st.sidebar.header("Filter")
+cari = st.sidebar.text_input("Cari nama atau simbol", "")
+min_volume = st.sidebar.number_input("Volume minimum (USD)", value=10_000_000)
+min_24j = st.sidebar.slider("Naik 24 jam minimal (%)", -20, 50, -20)
+min_7h = st.sidebar.slider("Naik 7 hari minimal (%)", -50, 100, -50)
+
+hasil = df[
+    (df["Volume (USD)"] >= min_volume)
+    & (df["Perubahan 24j (%)"] >= min_24j)
+    & (df["Perubahan 7h (%)"] >= min_7h)
+]
+
+if cari:
+    cocok = (
+        hasil["Nama"].str.contains(cari, case=False, na=False, regex=False)
+        | hasil["Simbol"].str.contains(cari, case=False, na=False, regex=False)
+    )
+    hasil = hasil[cocok]
+
+hasil = hasil.sort_values("Perubahan 24j (%)", ascending=False)
+
+st.write(f"Ditemukan {len(hasil)} koin")
+st.dataframe(hasil, use_container_width=True)
